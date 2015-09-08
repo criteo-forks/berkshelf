@@ -292,6 +292,62 @@ describe Berkshelf::Lockfile do
       expect(subject).to_not have_dependency('apache2')
     end
   end
+
+  describe '#reduce!' do
+    before(:each) do
+      allow(Berkshelf::Dependency).to receive(:name) do |dependency|
+        dependency.is_a?(String) ? dependency : dependency.name
+      end
+
+      apt_dep = double('apt',
+          name: 'apt',
+          version_constraint: Semverse::Constraint.new('~> 2.0'),
+          cached_cookbook: nil,
+      )
+      allow(apt_dep).to receive(:locked_version=)
+
+      jenkins_dep = double('jenkins',
+          name: 'jenkins',
+          version_constraint: Semverse::Constraint.new('~> 2.0'),
+      )
+      jenkins_cookbooks = {
+        '2.0.3' => double('jenkins-2.0.3',
+          version: '2.0.3',
+          dependencies: {
+            'apt' => '~> 2.0',
+            'runit' => '~> 1.5',
+            'yum' => '~> 3.0',
+          }
+        ),
+        '2.0.4' => double('jenkins-2.0.4',
+          version: '2.0.4',
+          dependencies: {
+            'apt' => '~> 2.0',
+            'runit' => '~> 1.5',
+          }
+        ),
+      }
+      jenkins_ver = '2.0.4'  # Defaulting to last version
+      allow(jenkins_dep).to receive(:locked_version=) { |ver| jenkins_ver = ver }
+      allow(jenkins_dep).to receive(:cached_cookbook) { jenkins_cookbooks[jenkins_ver] }
+
+      berksfile = double('berksfile',
+        dependencies: [apt_dep, jenkins_dep],
+        'has_dependency?' => true,
+      )
+      subject.instance_variable_set(:@berksfile, berksfile)
+    end
+
+    it 'uses the cookbook version specified in the lockfile' do
+      subject.reduce!
+      expect(subject.berksfile.dependencies[1].cached_cookbook.version).to eq('2.0.3')
+    end
+
+    it 'does not remove locks unnecessarily' do
+      expect(subject).to_not receive(:unlock)
+      subject.reduce!
+    end
+  end
 end
 
 describe Berkshelf::Lockfile::Graph do
